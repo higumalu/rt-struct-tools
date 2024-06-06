@@ -57,6 +57,17 @@ def get_slice_position(series_slice: Dataset):
     _, _, slice_direction = get_slice_directions(series_slice)
     return np.dot(slice_direction, series_slice.ImagePositionPatient)
 
+def get_distance_betweem_slices(sorted_image_series):
+    if False in [hasattr(ds, "ImagePositionPatient") for ds in sorted_image_series]:
+        raise Exception("No ImagePositionPatient attribute")
+    image_position_list = np.asanyarray([ds.ImagePositionPatient for ds in sorted_image_series]).astype(np.float32)
+    distance_list = np.linalg.norm(image_position_list[1:] - image_position_list[:-1], axis=1)
+    distance_between_slices = np.mean(distance_list)
+    distance_between_slices = self_round(distance_between_slices, 1)
+    if np.std(distance_list) > 0.01:
+        print("distance_between_slices_sd:{}".format(np.std(distance_list)))
+    return distance_between_slices
+
 
 def get_spacing_between_slices(series_data):
     if len(series_data) > 1:
