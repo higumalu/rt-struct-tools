@@ -184,8 +184,8 @@ def create_contour_sequence(mask_volume, image_series) -> Sequence:
 
     contour_data_seq = volume_to_contour_list(mask_volume, image_series)
 
-    for series_slice, contour_data in zip(image_series, contour_data_seq):
-        contour = create_contour_sequence_block(contour_data)
+    for index, [contour_data, image_slice] in enumerate(contour_data_seq):
+        contour = create_contour_sequence_block(contour_data, image_slice)
         contour_sequence.append(contour)
 
     return contour_sequence
@@ -257,6 +257,7 @@ def volume_to_contour_list(mask_volume, image_series):
 
             dicom_formatted_contour = np.ravel(transformed_contour).tolist()
             formatted_contours.append(dicom_formatted_contour)
+            formatted_contours.append([dicom_formatted_contour, series_slice])
 
     return formatted_contours
 
