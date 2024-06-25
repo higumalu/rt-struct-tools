@@ -193,12 +193,20 @@ def create_contour_sequence(mask_volume, image_series) -> Sequence:
 
 # ContourSequence -> [ContourImageSequence, ContourGeometricType, NumberOfContourPoints, ContourNumber, ContourData]    
 # -> ContourImageSequence -> [ReferencedSOPClassUID, ReferencedSOPInstanceUID]
-def create_contour_sequence_block(contour_data) -> Dataset:
+def create_contour_sequence_block(contour_data, image_slice) -> Dataset:
+    contour_image = Dataset()
+    contour_image.ReferencedSOPClassUID = image_slice.SOPClassUID
+    contour_image.ReferencedSOPInstanceUID = image_slice.SOPInstanceUID
+    contour_image_sequence = Sequence()
+    contour_image_sequence.append(contour_image)
+    
     contour = Dataset()
+    contour.ContourImageSequence = contour_image_sequence
     contour.ContourGeometricType = "CLOSED_PLANAR"
     contour.NumberOfContourPoints = (len(contour_data) / 3)
     contour_data = [round(coord, 3) for coord in contour_data]
     contour.ContourData = contour_data
+
     return contour
 
 
