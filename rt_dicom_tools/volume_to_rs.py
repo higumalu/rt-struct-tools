@@ -1,7 +1,7 @@
-from rs_to_volume import get_mask_volume
-from rs_builder import create_rtstruct_dataset
-from rs_builder import edit_required_elements
-from rs_builder import add_mask3d_into_rsds
+from .rs_to_volume import get_mask_volume
+from .rs_builder import create_rtstruct_dataset
+from .rs_builder import edit_required_elements
+from .rs_builder import add_mask3d_into_rsds
 
 from pydicom import dcmread
 from pydicom.dataset import Dataset
@@ -53,10 +53,10 @@ def create_rs_from_img_series_ds(img_ds_list):
 
 
 
-if __name__ == "__main__":
-
+# if __name__ == "__main__":
+def main():
     img_dir = "data/CT"
-    rs_dcm = "data/RTSTRUCT.dcm"
+    rs_dcm = "data/RS_A/RTSTRUCT.dcm"
 
     img_ds_list = load_ds_list_from_dir(img_dir)
     rs_ds = dcmread(rs_dcm)
@@ -86,7 +86,6 @@ if __name__ == "__main__":
     roi_name = "test_roi_name"
     roi_description = "test_desc_for_rs_roi"
     
-    
     writen_rs_ds = add_mask3d_into_rsds(
                             rs_ds=blank_rs_ds,
                             mask_volume=mask_volume,
@@ -97,15 +96,12 @@ if __name__ == "__main__":
                             roi_description=roi_description,
                     )
 
-
-
     # define contour information
     mask_volume = mask_volume_4d[11].astype(int)
     roi_color = [255, 0, 0]
     roi_number = 2
     roi_name = "test_roi_02"
     roi_description = "test_desc_for_rs_roi"
-    
     
     writen_rs_ds = add_mask3d_into_rsds(
                             rs_ds=writen_rs_ds,
@@ -117,4 +113,4 @@ if __name__ == "__main__":
                             roi_description=roi_description,
                     )
     
-    writen_rs_ds.save_as("data/RTSTRUCT_test.dcm", write_like_original=False)
+    writen_rs_ds.save_as("output/RTSTRUCT_test.dcm", write_like_original=False)

@@ -39,7 +39,7 @@ def get_transformation_matrix_for_pixel2patient(series_data):
     row_spacing, column_spacing = first_slice.PixelSpacing
     slice_spacing = get_spacing_between_slices(series_data)
     row_direction, column_direction, slice_direction = get_slice_directions(first_slice)
-
+    
     mat = np.identity(4, dtype=np.float32)
     mat[:3, 0] = row_direction * row_spacing
     mat[:3, 1] = column_direction * column_spacing
@@ -70,7 +70,16 @@ def mri_spacing_normalize(image_volume, origin_spacing=[3, 0.5, 0.5], target_spa
     z_space = origin_spacing[0] * image_volume.shape[0] / target_spacing[0]
     y_space = origin_spacing[1] * image_volume.shape[1] / target_spacing[1]
     x_space = origin_spacing[2] * image_volume.shape[2] / target_spacing[2]
+    # print(first_slice.ImagePositionPatient)
+    # print(spacing)                  # (x, y)
+    # print(thickness)                # z
+    # print(image_volume.shape)         # (z, y, x)
+    # z = image_volume.shape[0] * thickness
+    # y = image_volume.shape[1] * spacing[1]
+    # x = image_volume.shape[2] * spacing[0]
+    # print(z, y, x)
     normalized_img_volume = resize(image_volume, (z_space, y_space, x_space))
+    # print(f"resize image volume: {image_volume.shape}")
     return normalized_img_volume
 
 
@@ -89,6 +98,7 @@ def calc_distance_3d(point1, point2):
 
 def get_z_spacing(sorted_ds_list):
     return calc_distance_3d(sorted_ds_list[0].ImagePositionPatient, sorted_ds_list[-1].ImagePositionPatient) / (len(sorted_ds_list) - 1)
+     
 
 
 import matplotlib.pyplot as plt
@@ -106,7 +116,7 @@ def test_plot_value_histogram(image_volume):
 
 if __name__ == "__main__":
     
-    img_dir = "./Bseries_0"    # MR series dir path
+    img_dir = "./Bseries_0"    # MR series資料夾路徑
     
     img_ds_list = load_sorted_image_series(img_dir)
     img_volume = get_img_volume(img_ds_list)    # shape = [z, y, x]
@@ -115,6 +125,44 @@ if __name__ == "__main__":
     for index in range(len(img_ds_list) - 1):
         dist = calc_distance_3d(img_ds_list[index].ImagePositionPatient, img_ds_list[index+1].ImagePositionPatient)
         print("distance:", dist, "|| thickness:", img_ds_list[index].SliceThickness)
+
+
+    # ################ n4 bias field correction ###########################
+    # print(first_slice.StudyDescription, first_slice.SeriesDescription)
+    # img_volume = img_volume
+    # values = img_volume.flatten()
+    # plt.figure(figsize=(15, 6))
+    # n, bins, patches = plt.hist(values, bins=1000)  # Adjust the number of bins as needed
+    # plt.xlabel('Pixel Value')
+    # plt.ylabel('Frequency')
+    # plt.title(f'Histogram of Voxel Value {first_slice.StudyDescription, first_slice.SeriesDescription}')
+    # plt.ylim(0, max(n) * 0.5)
+    # plt.savefig(f'{img_dir}_histogram.png')
+    # plt.show()
+    
+    # for i in range(0, 11):
+    #     img_dir = f"./Pseries_{str(i)}"    # MR series資料夾路徑
+        
+    #     img_ds_list = load_sorted_image_series(img_dir)
+    #     img_volume = get_img_volume(img_ds_list)    # shape = [z, y, x]
+
+    #     first_slice = img_ds_list[0]
+    #     for index in range(len(img_ds_list) - 1):
+    #         dist = calc_distance_3d(img_ds_list[index].ImagePositionPatient, img_ds_list[index+1].ImagePositionPatient)
+    #         print("distance:", dist, "|| thickness:", img_ds_list[index].SliceThickness)
+
+    #     print(first_slice.StudyDescription, first_slice.SeriesDescription)
+    #     img_volume = img_volume
+    #     values = img_volume.flatten()
+    #     plt.figure(figsize=(15, 6))
+    #     n, bins, patches = plt.hist(values, bins=1000)  # Adjust the number of bins as needed
+    #     plt.xlabel('Pixel Value')
+    #     plt.ylabel('Frequency')
+    #     plt.title(f'Histogram of Voxel Value {first_slice.StudyDescription, first_slice.SeriesDescription, first_slice.PatientID, first_slice.ScanningSequence}')
+    #     plt.ylim(0, max(n) * 0.5)
+    #     plt.savefig(f'{img_dir}_histogram.png')
+    #     # plt.show()
+
 
 
     # ################ n4 bias field correction ###########################
@@ -158,7 +206,7 @@ if __name__ == "__main__":
 
 
 
-    ### test code ###
+    # 以下測試用的code
 
     # import matplotlib.pyplot as plt
     # from skimage.transform import resize
@@ -177,14 +225,13 @@ if __name__ == "__main__":
     #     plt.imshow(axial_slice, cmap='gray')
     #     plt.show()
 
-
     # for z in range(0, n4_img_volume.shape[0], 10):
     #     axial_slice = n4_img_volume[z, :, :]
     #     axial_slice = np.clip(axial_slice, np.max(axial_slice)*0.1, np.max(axial_slice)*0.9) 
     #     plt.imshow(axial_slice, cmap='gray')
     #     plt.show()
 
-    ######### compare img and n4_img #########
+    # 比較兩組影像
     # for z in range(0, img_volume.shape[0], 10):
     #     fig, axs = plt.subplots(1, 2, figsize=(15, 15))
     #     img_axial_slice = img_volume[z, :, :]

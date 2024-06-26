@@ -9,8 +9,8 @@ from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
 from pydicom.sequence import Sequence
 from pydicom.uid import ImplicitVRLittleEndian
 
-from contour_process_method import contour_process
-from coordinate_transform import get_pixel_to_patient_transformation_matrix, apply_transformation_to_3d_points
+from .contour_process_method import contour_process
+from .coordinate_transform import get_pixel_to_patient_transformation_matrix, apply_transformation_to_3d_points
 
 
 def edit_required_elements(ds: FileDataset,
@@ -18,9 +18,9 @@ def edit_required_elements(ds: FileDataset,
                            manufacturer="higumalu",
                            manufacturer_model_name="modelv1.0",
                            institution_name="higumalu"):
-    
+    ymd_hm = datetime.datetime.now()
     ds.StructureSetLabel = structure_set_label
-    ds.SeriesDescription = structure_set_label+"__test"
+    ds.SeriesDescription = structure_set_label + "_" + ymd_hm.strftime("%Y%m%d_%H%M")
     ds.Manufacturer = manufacturer
     ds.ManufacturerModelName = manufacturer_model_name
     ds.InstitutionName = institution_name
@@ -36,7 +36,7 @@ def create_rtstruct_dataset(series_data) -> FileDataset:
 
 
 def generate_base_dataset() -> FileDataset:
-    file_name = "rs_test"
+    file_name = "rs_file"
     file_meta = get_file_meta()
     ds = FileDataset(file_name, {}, file_meta=file_meta, preamble=b"\0" * 128)
     add_required_elements_to_ds(ds)
@@ -117,7 +117,7 @@ def add_refd_frame_of_ref_sequence(ds: FileDataset, series_data):
 
     ds.ReferencedFrameOfReferenceSequence = Sequence()
     ds.ReferencedFrameOfReferenceSequence.append(refd_frame_of_ref)
-
+    ds.FrameOfReferenceUID = getattr(series_data[0], 'FrameOfReferenceUID', generate_uid())
 
 
 # General Study --> Referenced Study Sequence --> [ReferencedSOPClassUID, ReferencedSOPInstanceUID]
@@ -153,20 +153,22 @@ def create_contour_image_sequence(series_data) -> Sequence:
     return contour_image_sequence
 
 
-
-
 # StructureSetROISequence  --> [ROINumber, ReferencedFrameOfReferenceUID, ROIName, ROIGenerationAlgorithm=AUTOMATIC]
 ################################ StructureSetROISequence ####################################################################
-def create_structure_set_roi(roi_number, refd_frame_of_ref_uid, roi_name, roi_description) -> Dataset:
+def create_structure_set_roi(roi_number,
+                             refd_frame_of_ref_uid,
+                             roi_name, roi_description,
+                             roi_generation_algorithm="AUTOMATIC",
+                             roi_generation_description="BearGenerated") -> Dataset:
     # Structure Set ROI Sequence: Structure Set ROI 1
     structure_set_roi = Dataset()
     structure_set_roi.ROINumber = roi_number
     structure_set_roi.ReferencedFrameOfReferenceUID = refd_frame_of_ref_uid
     structure_set_roi.ROIName = roi_name
     structure_set_roi.ROIDescription = roi_description
-    structure_set_roi.ROIGenerationAlgorithm = "AUTOMATIC"
+    structure_set_roi.ROIGenerationAlgorithm = roi_generation_algorithm
+    structure_set_roi.ROIGenerationDescription = roi_generation_description
     return structure_set_roi
-
 
 
 # create ROIContourSequence -> ContourSequence -> [ContourImageSequence / ContourData / ContourNumber / ...]
@@ -178,10 +180,10 @@ def create_roi_contour_sequence(roi_number, roi_color, mask_volume, image_series
     roi_contour_sequence.ContourSequence = create_contour_sequence(mask_volume, image_series)
     return roi_contour_sequence
 
+
 # 3Dmask -[for loop]-> 2Dmask -[cv2.findContours]-> poly_list -[for loop]-> 2Dcontour
 def create_contour_sequence(mask_volume, image_series) -> Sequence:
     contour_sequence = Sequence()
-
     contour_data_seq = volume_to_contour_list(mask_volume, image_series)
 
     for index, [contour_data, image_slice] in enumerate(contour_data_seq):
@@ -194,21 +196,17 @@ def create_contour_sequence(mask_volume, image_series) -> Sequence:
 # ContourSequence -> [ContourImageSequence, ContourGeometricType, NumberOfContourPoints, ContourNumber, ContourData]    
 # -> ContourImageSequence -> [ReferencedSOPClassUID, ReferencedSOPInstanceUID]
 def create_contour_sequence_block(contour_data, image_slice) -> Dataset:
-    contour_image = Dataset()
-    contour_image.ReferencedSOPClassUID = image_slice.SOPClassUID
-    contour_image.ReferencedSOPInstanceUID = image_slice.SOPInstanceUID
-    contour_image_sequence = Sequence()
-    contour_image_sequence.append(contour_image)
-    
     contour = Dataset()
-    contour.ContourImageSequence = contour_image_sequence
     contour.ContourGeometricType = "CLOSED_PLANAR"
     contour.NumberOfContourPoints = (len(contour_data) / 3)
     contour_data = [round(coord, 3) for coord in contour_data]
     contour.ContourData = contour_data
 
-    return contour
+    contour.ContourImageSequence = Sequence()
+    contour.ContourImageSequence.ReferencedSOPClassUID = image_slice.SOPClassUID
+    contour.ContourImageSequence.ReferencedSOPInstanceUID = image_slice.SOPInstanceUID
 
+    return contour
 
 
 # 3Dmask
@@ -232,18 +230,16 @@ def volume_to_contour_list(mask_volume, image_series):
                                                 )
         if cv2_contours is None or hierarchy is None: continue
 
-
         for hier_index, contour in enumerate(cv2_contours):
             poly_hierarchy = hierarchy[0][hier_index][3]
             
             x_points, y_points = contour.T[:, 0]
             
-
             # interface for contour smoothing and other process
             x_points, y_points = contour_process(x_points, y_points, poly_hierarchy,
                                                  external_noise_size=10,
                                                  internal_noise_size=10,
-                                                 low_pass_ratio=10)
+                                                 low_pass_ratio=8)
             
             # check if contour is not empty
             if len(x_points) == 0 or len(y_points) == 0: continue
@@ -256,7 +252,6 @@ def volume_to_contour_list(mask_volume, image_series):
             transformed_contour = apply_transformation_to_3d_points(contour, transformation_matrix)
 
             dicom_formatted_contour = np.ravel(transformed_contour).tolist()
-            formatted_contours.append(dicom_formatted_contour)
             formatted_contours.append([dicom_formatted_contour, series_slice])
 
     return formatted_contours
@@ -270,13 +265,13 @@ def create_rtroi_observation(roi_number) -> Dataset:
 
     rtroi_observation.ROIObservationDescription = "Type:Soft,Range:*/*,Fill:0,Opacity:0.0,Thickness:1,LineThickness:2,read-only:false"
     rtroi_observation.private_creators = "higumalu"
-    rtroi_observation.RTROIInterpretedType = ""
+    rtroi_observation.RTROIInterpretedType = "ORGAN"
     rtroi_observation.ROIInterpreter = ""
     return rtroi_observation
 
 
-
-
+################################ add into ROIContourSequence method ##################################################
+# method for adding roi into rsds
 def add_mask3d_into_rsds(
             rs_ds,
             mask_volume,
@@ -293,3 +288,62 @@ def add_mask3d_into_rsds(
     rs_ds.RTROIObservationsSequence.append(create_rtroi_observation(roi_number))
     
     return rs_ds
+
+
+################################### merge into ROIContourSequence method #############################################
+def add_roi_seq_into_rsds(
+            rs_ds,
+            ref_roi_ds,
+            image_series,
+            old_roi_name,
+            new_roi_name=None,
+            roi_number=None,
+            roi_color=None,
+            roi_description=None
+            ) -> Dataset:
+    
+    ref_roi_dict = extract_rsds_by_roi_name(ref_roi_ds, old_roi_name)
+    print(ref_roi_dict)
+    refd_frame_of_ref_uid = image_series[0].FrameOfReferenceUID
+
+    if new_roi_name is None: new_roi_name = ref_roi_dict["ROIName"]
+    if roi_color is None: roi_color = ref_roi_dict["ROIDisplayColor"]
+    if roi_description is None: roi_description = ref_roi_dict["ROIDescription"]
+    if roi_number is None: roi_number = len(rs_ds.StructureSetROISequence) + 1
+
+    rs_ds.StructureSetROISequence.append(create_structure_set_roi(roi_number, refd_frame_of_ref_uid, new_roi_name, roi_description))
+    rs_ds.ROIContourSequence.append(merge_roi_contour_sequence(roi_number, roi_color, ref_roi_dict["ContourSequence"]))
+    rs_ds.RTROIObservationsSequence.append(create_rtroi_observation(roi_number))
+
+    return rs_ds
+
+
+def extract_rsds_by_roi_name(rs_ds, roi_name):
+    roi_dict = {}
+    for ssroi in rs_ds.StructureSetROISequence:
+        print(ssroi.ROIName)
+        if ssroi.ROIName != roi_name:
+            continue
+        roi_dict["ROIName"] = ssroi.ROIName
+        roi_dict["ROINumber"] = ssroi.ROINumber
+        roi_dict["ROIDescription"] = getattr(ssroi, 'ROIDescription', None)
+        roi_dict["ROIGenerationAlgorithm"] = ssroi.ROIGenerationAlgorithm
+    
+    print(roi_dict)
+    
+    for roi_ctr in rs_ds.ROIContourSequence:
+        if roi_ctr.ReferencedROINumber != roi_dict["ROINumber"]:
+            continue
+        roi_dict["ROIDisplayColor"] = roi_ctr.ROIDisplayColor
+        roi_dict["ContourSequence"] = roi_ctr.ContourSequence
+
+    return roi_dict
+
+
+def merge_roi_contour_sequence(roi_number, roi_color, contour_sequence) -> Dataset:     # == create_roi_contour() in rt-utils
+    roi_contour_sequence = Dataset()
+    roi_contour_sequence.ReferencedROINumber = roi_number    # also in create_structure_set_roi
+    roi_contour_sequence.ROIDisplayColor = roi_color
+    roi_contour_sequence.ContourSequence = contour_sequence
+    return roi_contour_sequence
+

@@ -10,6 +10,7 @@ import cv2 as cv
 
 # *** func ref. by rt-utils ***
 
+
 def load_sorted_image_series(dicom_series_path: str):
     """
     File contains helper methods for loading / formatting DICOM images and contours
@@ -24,7 +25,6 @@ def load_sorted_image_series(dicom_series_path: str):
     series_data.sort(key=get_slice_position, reverse=False)
 
     return series_data
-
 
 
 def load_dcm_images_from_path(dicom_series_path: str) -> List[Dataset]:
@@ -42,6 +42,7 @@ def load_dcm_images_from_path(dicom_series_path: str) -> List[Dataset]:
 
     return series_data
 
+
 def create_empty_series_mask(series_data):
     ref_dicom_image = series_data[0]
     mask_dims = (
@@ -56,17 +57,6 @@ def create_empty_series_mask(series_data):
 def get_slice_position(series_slice: Dataset):
     _, _, slice_direction = get_slice_directions(series_slice)
     return np.dot(slice_direction, series_slice.ImagePositionPatient)
-
-def get_distance_betweem_slices(sorted_image_series):
-    if False in [hasattr(ds, "ImagePositionPatient") for ds in sorted_image_series]:
-        raise Exception("No ImagePositionPatient attribute")
-    image_position_list = np.asanyarray([ds.ImagePositionPatient for ds in sorted_image_series]).astype(np.float32)
-    distance_list = np.linalg.norm(image_position_list[1:] - image_position_list[:-1], axis=1)
-    distance_between_slices = np.mean(distance_list)
-    distance_between_slices = self_round(distance_between_slices, 1)
-    if np.std(distance_list) > 0.01:
-        print("distance_between_slices_sd:{}".format(np.std(distance_list)))
-    return distance_between_slices
 
 
 def get_spacing_between_slices(series_data):
@@ -127,6 +117,7 @@ def get_slice_contour_data(series_slice: Dataset, contour_sequence: Sequence):
         for contour_image in contour.ContourImageSequence:
             if contour_image.ReferencedSOPInstanceUID == series_slice.SOPInstanceUID:
                 slice_contour_data.append(contour.ContourData)
+    # print(f"Found {len(slice_contour_data)} contours in slice")
     return slice_contour_data
 
 
@@ -159,10 +150,16 @@ def get_slice_mask_from_slice_contour_data(
         translated_contour_data = apply_transformation_to_3d_points(reshaped_contour_data, transformation_matrix)
         polygon = [np.around([translated_contour_data[:, :2]]).astype(np.int32)]
         polygon = np.array(polygon).squeeze()
+        if len(polygon) < 3:
+            continue
         polygons.append(polygon)
+
     slice_mask = create_empty_slice_mask(series_slice).astype(np.uint8)
-    cv.fillPoly(img=slice_mask, pts = polygons, color = 1)
-    return slice_mask
+    if len(polygons) < 1:
+        return slice_mask
+    else:
+        slice_mask = cv.fillPoly(img=slice_mask, pts=polygons, color=1)
+        return slice_mask
 
 
 def get_contour_sequence_by_roi_number(rs_ds, roi_number):
@@ -209,6 +206,7 @@ def get_roi_mask_list(rs_ds, img_ds_list) -> np.ndarray:
 
     return mask_list
 
+
 def get_roi_mask_4d(rs_ds, img_ds_list) -> np.ndarray:
     """
     Returns the 3D binary mask of the ROI with the given input name
@@ -225,6 +223,7 @@ def get_roi_mask_4d(rs_ds, img_ds_list) -> np.ndarray:
     # print(mask_4d.shape)
     return mask_4d
 
+
 def get_roi_mask_dict(rs_ds, img_ds_list):
     mask_dict = {}
     for structure_roi in rs_ds.StructureSetROISequence:
@@ -236,7 +235,8 @@ def get_roi_mask_dict(rs_ds, img_ds_list):
         binary_mask = create_series_mask_from_contour_sequence(img_ds_list, contour_sequence)
 
         # Update the mask dictionary
-        mask_dict[structure_roi.ROINumber, structure_roi.ROIName] = binary_mask
+        # mask_dict[structure_roi.ROINumber, structure_roi.ROIName] = binary_mask
+        mask_dict[structure_roi.ROIName] = binary_mask
 
     return mask_dict
 
@@ -249,7 +249,14 @@ def transform_img_data(img_ds):
 def get_img_volume(img_ds_list):
     
     img_list = [transform_img_data(img) for img in img_ds_list]
-    img_volume = np.array(img_list)     # z, y, x
+    img_volume = np.array(img_list)
+    # img_volume = img_volume.transpose(0, 2, 1)  # 轉 z x y 用這行
+    # img_volume = img_volume.transpose(1, 2, 0)  # 轉 y x z (跟mask一樣)用這行
+
+    # 以下測試用的code請忽略
+    # img_volume = np.clip(img_volume, np.max(img_volume)*0.1, np.max(img_volume)*0.9)  
+    # img_volume = (img_volume - np.min(img_volume)) / (np.max(img_volume) - np.min(img_volume)) * 255
+    # img_volume = np.power(img_volume / 255.0, gamma) * 255.0
     return img_volume
 
 
@@ -267,7 +274,7 @@ def flip_volume_by_position(volume, img_ds_list):
         if 1 - slice_direction[2] < 0.5:
             volume = np.flip(volume, axis=0)
             print('flip Feet First')
-    else :
+    else:
         print("weird position")
 
     if pos[2] == "P":
@@ -276,6 +283,7 @@ def flip_volume_by_position(volume, img_ds_list):
 
     return volume
 
+
 def get_mask_volume(rs_ds, img_ds_list):
     mask_volume = get_roi_mask_4d(rs_ds, img_ds_list)
     return mask_volume
@@ -283,12 +291,109 @@ def get_mask_volume(rs_ds, img_ds_list):
 
 if __name__ == "__main__":
 
-    img_dir = "./MR"                   # image series dir path
-    rs_dcm = "./RS/RTSTRUCT.dcm"       # RS file
+    img_dir = "./MR"                      # MR series dir path
+    rs_dcm = "./RS/RTSTRUCT.dcm"          # RS file
 
     img_ds_list = load_sorted_image_series(img_dir)
     rs_ds = dcmread(rs_dcm)
 
-    img_volume = get_img_volume(img_ds_list)    # shape = [z, y, x]
+    img_volume = get_img_volume(img_ds_list)            # shape = [z, y, x]
 
     mask_volume = get_roi_mask_4d(rs_ds, img_ds_list)   # shape = [cate, z, y, x]
+    for index in range(mask_volume):
+        if np.sum(mask_volume[index]) > 1:
+            print(index)
+    # mask_list = get_roi_mask_list(rs_ds, img_ds_list)
+    # mask_dict = get_roi_mask_dict(rs_ds, img_ds_list)
+
+    
+    # np.save('img_volume.npy', img_volume)    # save img_volume
+    # np.save('mask_volume.npy', mask_volume)  # save mask_volume
+
+
+    # print(get_slice_directions(img_ds_list[0]))
+
+    # first_slice = img_ds_list[0]
+    # print(first_slice.PatientPosition)
+
+
+
+
+
+    # 要根據pos翻轉下三行註解取消
+    # img_volume = flip_volume_by_position(img_volume, img_ds_list)   # flip image_volume
+
+    # for cate in range(len(mask_volume)):                            # flip mask_volume
+    #     mask_volume[cate] = flip_volume_by_position(mask_volume[cate], img_ds_list)
+
+
+
+    # 以下測試用的code
+
+    # import matplotlib.pyplot as plt
+    # from skimage.transform import resize
+
+    # ############### test img volume ########################
+    # for z in range(0, img_volume.shape[0], 10):
+    #     axial_slice = img_volume[z, :, :]
+    #     plt.imshow(axial_slice, cmap='gray')
+    #     plt.show()
+
+
+    # for y in range(0, img_volume.shape[1], 20):
+    #     sag_slice = img_volume[:, y, :]
+    #     print(sag_slice.shape)
+    #     sag_slice = resize(sag_slice, (1024, 1024), mode='constant', preserve_range=True, anti_aliasing=True)
+    #     plt.imshow(sag_slice, cmap='gray')
+    #     plt.show()
+
+    # for x in range(0, img_volume.shape[2], 20):
+    #     sag_slice = img_volume[:, :, x]
+    #     print(sag_slice.shape)
+    #     sag_slice = resize(sag_slice, (1024, 1024), mode='constant', preserve_range=True, anti_aliasing=True)
+    #     plt.imshow(sag_slice, cmap='gray')
+    #     plt.show()
+    ##########################################################
+
+
+
+    # ################### test mask volume ########################
+
+    # cate = 1
+    # mask_volume = mask_volume * 255
+    # for z in range(0, mask_volume.shape[1], 10):
+    #     axial_slice = mask_volume[cate, z, :, :]
+    #     plt.imshow(axial_slice, cmap=plt.cm.gray)
+    #     plt.show()
+
+    # for y in range(0, mask_volume.shape[2], 20):
+    #     sag_slice = mask_volume[cate, :, y, :]
+    #     print(sag_slice.shape)
+    #     sag_slice = resize(sag_slice, (1024, 1024), mode='constant', preserve_range=True, anti_aliasing=True)
+    #     plt.imshow(sag_slice, cmap=plt.cm.gray)
+    #     plt.show()
+
+    # for x in range(0, mask_volume.shape[3], 20):
+    #     sag_slice = mask_volume[cate, :, :, x]
+    #     print(sag_slice.shape)
+    #     sag_slice = resize(sag_slice, (1024, 1024), mode='constant', preserve_range=True, anti_aliasing=True)
+    #     plt.imshow(sag_slice, cmap=plt.cm.gray)
+    #     plt.show()
+    # ##########################################################
+
+    import matplotlib.pyplot as plt
+    
+    fig, axs = plt.subplots(5, 5, figsize=(20, 15))
+
+    for z in range(0, img_volume.shape[0]):
+        ax = axs[int(z // 5), z % 5]
+        axial_slice = img_volume[z, :, :]
+        ax.imshow(axial_slice, cmap='gray')
+        # for cate in range(len(mask_volume)):
+        mask_slice = mask_volume[10, z, :, :]
+        ax.imshow(mask_slice, cmap='jet', alpha=0.5)
+    
+    plt.show()
+
+
+

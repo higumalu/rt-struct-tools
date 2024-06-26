@@ -5,7 +5,7 @@ import numpy as np
 
 def get_slice_position(series_slice: Dataset):
     _, _, slice_direction = get_slice_directions(series_slice)
-    return np.dot(slice_direction, series_slice.ImagePositionPatient)
+    return np.dot(slice_direction, series_slice.ImagePositionPatient)   # z-slice number
 
 
 def get_slice_directions(series_slice: Dataset):
@@ -72,7 +72,7 @@ def get_patient_to_pixel_transformation_matrix(series_data):
 
 def apply_transformation_to_3d_points(
     points: np.ndarray, transformation_matrix: np.ndarray
-):
+    ):
     """
     * Augment each point with a '1' as the fourth coordinate to allow translation
     * Multiply by a 4x4 transformation matrix
